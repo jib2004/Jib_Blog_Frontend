@@ -9,6 +9,8 @@ function normalizePost(post: ApiPost, currentEmail = ''): Post {
   return { id: getId(post),user_id:post.user_id, title: post.title, content: post.content, author: getAuthorEmail(post.author, currentEmail), createdAt: post.created_at || post.createdAt || 'Recently' }
 }
 
+
+
 function App() {
   const [posts, setPosts] = useState<Post[]>([])
   const [session, setSession] = useState<Session | null>(() => JSON.parse(localStorage.getItem('jib-session') || 'null'))
@@ -28,7 +30,7 @@ function App() {
     // setLoading(true)
     Promise.all([api.me(session.token), api.blogs()]).then(([user, apiPosts]) => {
       // setSession({ ...session, user })
-      setPosts((apiPosts as ApiPost[]).map((post) => normalizePost(post, user.email)))
+      setPosts((apiPosts as ApiPost[]).map((post) => normalizePost({...post}, user.email)))
     }).catch((error: Error) => { setDashboardError(error.message) }).finally(() => setLoading(false))
   }, [])
 
@@ -51,7 +53,7 @@ function App() {
       const response = await api.login(email, authForm.password)
       const token = getToken(response)
       if (!token) throw new Error('The API did not return a JWT token.')
-      const user = response.user || await api.me(token)
+      const user = response?.userInfo || await api.me(token)
       setSession({ user, token }); 
       setAuthForm({ email: '', password: '' })
     } catch (error) { setAuthError(error instanceof Error ? error.message : 'Unable to authenticate.') } finally { setLoading(false) }
@@ -64,7 +66,9 @@ function App() {
   const visiblePosts = posts.filter((post) => `${post.title} ${post.content}`.toLowerCase().includes(search.toLowerCase()))
   const savePost = async (post: Post) => {
     try {
-      const saved = post.id ? await api.updateBlog(post.id, post, session.token) : await api.createBlog(post, session.token)
+      const saved = post.id
+        ? await api.updateBlog(post.id, post, loggedInUserId, session.token)
+        : await api.createBlog(post, loggedInUserId, session.token)
       const normalized = normalizePost(saved, session.user.email)
       setPosts(post.id ? posts.map((item) => item.id === post.id ? normalized : item) : [normalized, ...posts]); setEditor(null); setDashboardError('')
     } catch (error) { setDashboardError(error instanceof Error ? error.message : 'Unable to save post.') }
@@ -89,12 +93,12 @@ function AuthPage({ page, form, error, onChange, onSubmit, onSwitch }: { page: '
   return <div className="auth-page"><div className="auth-panel"><a className="brand" href="."><span className="brand-mark">j</span> jib<span className="brand-dot">.</span>blog</a><div className="auth-copy"><p className="eyebrow">Private publishing space</p><h1>{page === 'login' ? 'Welcome back.' : 'Create your account.'}</h1><p className="muted">{page === 'login' ? 'Sign in to manage your stories.' : 'Join jib.blog and start publishing.'}</p></div><form className="auth-form" onSubmit={onSubmit}><label>Email address<input type="email" value={form.email} onChange={(event) => onChange({ ...form, email: event.target.value })} required /></label><label>Password<input type="password" value={form.password} onChange={(event) => onChange({ ...form, password: event.target.value })} minLength={8} required /></label>{error && <p className="error">{error}</p>}<button className="primary full" type="submit">{page === 'login' ? 'Sign in' : 'Register'} <span>↗</span></button></form><p className="switch">{page === 'login' ? 'No account yet?' : 'Already registered?'} <button onClick={onSwitch}>{page === 'login' ? 'Register' : 'Sign in'}</button></p></div><div className="auth-aside"><span className="aside-number">J/01</span><p>Write what<br /><em>matters.</em></p><span className="aside-footer">A simple place for<br />considered ideas.</span></div></div>
 }
 
-function PostEditor({ post, onClose, onSave }: { post: Post; onClose: () => void; onSave: (post: Post) => void }) {
+ function PostEditor({ post, onClose, onSave }: { post: Post; onClose: () => void; onSave: (post: Post) => void }) {
   const [draft, setDraft] = useState(post)
   const [error, setError] = useState('')
   const submit = (event: FormEvent) => { 
     event.preventDefault(); 
-   
+  
 
     if (draft.title.trim().length < 3 || draft.content.trim().length < 20) { setError('Title must be 5+ characters and content must be 20+ characters.'); return } onSave({ ...draft, title: draft.title.trim(), content: draft.content.trim(), }) }
   return <div className="modal-backdrop"><div className="editor-modal"><button className="close" onClick={onClose}>×</button><p className="eyebrow">Post editor</p><h2>{post.id ? 'Edit post' : 'New post'}</h2><form onSubmit={submit}><label>Title<input value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} /></label><label>Content<textarea rows={8} value={draft.content} onChange={(event) => setDraft({ ...draft, content: event.target.value })} /></label>{error && <p className="error">{error}</p>}<button className="primary full" type="submit">{post.id ? 'Save changes' : 'Publish post'} <span>↗</span></button></form></div></div>
